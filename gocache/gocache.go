@@ -1,4 +1,4 @@
-// Group 是 GeeCache 最核心的数据结构，负责与用户的交互，并且控制缓存值存储和获取的流程。
+// Group 是 GoCache 最核心的数据结构，负责与用户的交互，并且控制缓存值存储和获取的流程。
 /*
                             是
 接收 key --> 检查是否被缓存 -----> 返回缓存值 ⑴
@@ -17,6 +17,7 @@ import (
 )
 
 // 定义接口 参数是string 返回值是[]byte
+// 当从缓存中获取数据失败时的回调函数 用于从源获取数据
 type Getter interface {
 	Get(key string) ([]byte, error)
 }
@@ -35,9 +36,10 @@ func (f GetterFunc) Get(key string) ([]byte, error) {
 // 一个 Group 可以认为是一个缓存的命名空间，每个 Group 拥有一个唯一的名称 name。
 // 比如可以创建三个 Group，缓存学生的成绩命名为 scores，缓存学生信息的命名为 info，缓存学生课程的命名为 courses。
 type Group struct {
-	name      string // 每个 Group 拥有一个唯一的名称 name
-	getter    Getter // 即缓存未命中时获取源数据的回调(callback)
-	mainCache cache  // 即一开始实现的并发缓存
+	name      string     // 每个 Group 拥有一个唯一的名称 name
+	getter    Getter     // 即缓存未命中时获取源数据的回调(callback)
+	mainCache cache      // 即一开始实现的并发缓存
+	peers     PeerPicker // 将 实现了 PeerPicker 接口的 HTTPPool 注入到 Group 中
 }
 
 var (
@@ -61,6 +63,7 @@ func NewGroup(name string, cacheBytes int64, getter Getter) *Group {
 	return g
 }
 
+// 获取对应组
 func GetGroup(name string) *Group {
 	mu.RLock()
 	g := groups[name]
@@ -86,10 +89,31 @@ func (g *Group) Get(key string) (ByteView, error) {
 	return g.load(key)
 }
 
+// 缓存未命中时 用load获取源数据
 func (g *Group) load(key string) (value ByteView, err error) {
+	// 从其他节点缓存获取数据
+	if g.peers != nil {
+		if peer, ok := g.peers.PickPeer(key); ok {
+			if value, err := g.getFromPeer(peer, key); err != nil {
+				return value, nil
+			}
+		}
+		log.Println("[Gocache] Failed to get from peer", err)
+	}
+	// 否则从本地源获取数据
 	return g.getLocally(key)
 }
 
+// 从其他节点获取数据 并转为ByteView类型
+func (g *Group) getFromPeer(peer PeerGetter, key string) (ByteView, error) {
+	bytes, err := peer.Get(g.name, key)
+	if err != nil {
+		return ByteView{}, err
+	}
+	return ByteView{b: bytes}, nil
+}
+
+// 从本地获取源数据
 func (g *Group) getLocally(key string) (ByteView, error) {
 	// 获取源数据
 	bytes, err := g.getter.Get(key)
@@ -107,4 +131,12 @@ func (g *Group) getLocally(key string) (ByteView, error) {
 // 将从源数据获取的数据 放入缓存中
 func (g *Group) populateCache(key string, value ByteView) {
 	g.mainCache.add(key, value)
+}
+
+// 将实现了 PeerPicker 接口的 HTTPPool 注入到 Group 中
+func (g *Group) RegisterPeers(peers PeerPicker) {
+	if g.peers != nil {
+		panic("RegisterPeerPicker called more than once")
+	}
+	g.peers = peers
 }

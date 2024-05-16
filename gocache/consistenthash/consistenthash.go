@@ -1,6 +1,10 @@
 package consistenthash
 
-import "hash/crc32"
+import (
+	"hash/crc32"
+	"sort"
+	"strconv"
+)
 
 // 定义了函数类型 Hash，采取依赖注入的方式，允许用于替换成自定义的 Hash 函数，默认为 crc32.ChecksumIEEE 算法。
 type Hash func(data []byte) uint32
@@ -15,9 +19,9 @@ type Map struct {
 
 func New(replicas int, fn Hash) *Map {
 	m := &Map{
-		hash : fn,
+		hash:     fn,
 		replicas: replicas,
-		hashMap : map[int]string
+		hashMap:  make(map[int]string),
 	}
 	if m.hash == nil {
 		m.hash = crc32.ChecksumIEEE //  ChecksumIEEE需要更详细的资料
@@ -53,7 +57,7 @@ func (m *Map) Get(key string) string {
 	hash := int(m.hash([]byte(key)))
 	// 在hash环上顺时针查找虚拟节点在keys中的下标
 	idx := sort.Search(len(m.keys), func(i int) bool {
-		return m.keys >= hash
+		return m.keys[i] >= hash
 	})
 	// 返回虚拟节点对应的真实节点 如果idx==len(m.keys) 说明应该选择m.keys[0] 因为keys是个环状结构
 	return m.hashMap[m.keys[idx%len(m.keys)]]

@@ -14,6 +14,9 @@ import (
 	"fmt"
 	"log"
 	"sync"
+
+	pb "example/gocache/gocachepb"
+	"example/gocache/singleflight"
 )
 
 // 定义接口 参数是string 返回值是[]byte
@@ -36,10 +39,11 @@ func (f GetterFunc) Get(key string) ([]byte, error) {
 // 一个 Group 可以认为是一个缓存的命名空间，每个 Group 拥有一个唯一的名称 name。
 // 比如可以创建三个 Group，缓存学生的成绩命名为 scores，缓存学生信息的命名为 info，缓存学生课程的命名为 courses。
 type Group struct {
-	name      string     // 每个 Group 拥有一个唯一的名称 name
-	getter    Getter     // 即缓存未命中时获取源数据的回调(callback)
-	mainCache cache      // 即一开始实现的并发缓存
-	peers     PeerPicker // 将 实现了 PeerPicker 接口的 HTTPPool 注入到 Group 中
+	name      string              // 每个 Group 拥有一个唯一的名称 name
+	getter    Getter              // 即缓存未命中时获取源数据的回调(callback)
+	mainCache cache               // 即一开始实现的并发缓存
+	peers     PeerPicker          // 将 实现了 PeerPicker 接口的 HTTPPool(网络模块) 注入到 Group 中
+	loader    *singleflight.Group // 请求锁 保证同一个key的请求在同一时间只有一个 减少请求数量
 }
 
 var (
@@ -58,6 +62,7 @@ func NewGroup(name string, cacheBytes int64, getter Getter) *Group {
 		name:      name,
 		getter:    getter,
 		mainCache: cache{cacheBytes: cacheBytes},
+		loader:    &singleflight.Group{},
 	}
 	groups[name] = g
 	return g
@@ -91,26 +96,38 @@ func (g *Group) Get(key string) (ByteView, error) {
 
 // 缓存未命中时 用load获取源数据
 func (g *Group) load(key string) (value ByteView, err error) {
-	// 从其他节点缓存获取数据
-	if g.peers != nil {
-		if peer, ok := g.peers.PickPeer(key); ok {
-			if value, err := g.getFromPeer(peer, key); err != nil {
-				return value, nil
+	// 用loader.Do去获取数据 保证同时时刻同一个key的请求只有一个
+	viewi, err := g.loader.Do(key, func() (interface{}, error) {
+		// 从其他节点缓存获取数据
+		if g.peers != nil {
+			if peer, ok := g.peers.PickPeer(key); ok {
+				if value, err := g.getFromPeer(peer, key); err == nil {
+					return value, nil
+				}
 			}
+			log.Println("[Gocache] Failed to get from peer", err)
 		}
-		log.Println("[Gocache] Failed to get from peer", err)
+		// 否则从本地源获取数据
+		return g.getLocally(key)
+	})
+	if err == nil {
+		return viewi.(ByteView), nil
 	}
-	// 否则从本地源获取数据
-	return g.getLocally(key)
+	return
 }
 
 // 从其他节点获取数据 并转为ByteView类型
 func (g *Group) getFromPeer(peer PeerGetter, key string) (ByteView, error) {
-	bytes, err := peer.Get(g.name, key)
+	req := &pb.Request{
+		Group: g.name,
+		Key:   key,
+	}
+	res := &pb.Response{}
+	err := peer.Get(req, res)
 	if err != nil {
 		return ByteView{}, err
 	}
-	return ByteView{b: bytes}, nil
+	return ByteView{b: res.Value}, nil
 }
 
 // 从本地获取源数据

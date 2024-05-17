@@ -2,6 +2,7 @@ package gocache
 
 import (
 	"example/gocache/consistenthash"
+	pb "example/gocache/gocachepb"
 	"fmt"
 	"io"
 	"log"
@@ -9,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+
+	"go.starlark.net/lib/proto"
 )
 
 const (
@@ -69,9 +72,14 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// application/octet-stream通常用来表示响应体是一些二进制流数据，而非文本。
 	// 当响应的内容不应由浏览器直接显示，或者当内容的类型未知或不具体时，常用这个类型。
 	// 例如，它经常用于文件下载的场景，告诉浏览器或其他客户端应该将响应的数据视为文件来处理。
+	body, err := proto.Marshal(&pb.Response{Value: view.ByteSlice()})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/octet-stream")
 	//将数据写回
-	w.Write(view.ByteSlice())
+	w.Write(body)
 }
 
 // HTTPPool客户端功能
@@ -81,32 +89,35 @@ type httpGetter struct {
 	baseURL string // 表示将要访问的远程节点的地址，例如http://example.com/_geecache/
 }
 
-func (h *httpGetter) Get(group, key string) ([]byte, error) {
+func (h *httpGetter) Get(in *pb.Request, out *pb.Response) error {
 	// 拼接要访问节点的路由  baseURL + group + key
 	u := fmt.Sprintf(
 		"%v%v/%v",
 		h.baseURL,
-		url.QueryEscape(group), //QueryEscape 函数用来转义URL查询字符串中的特殊字符
-		url.QueryEscape(key),
+		url.QueryEscape(in.GetGroup()), //QueryEscape 函数用来转义URL查询字符串中的特殊字符
+		url.QueryEscape(in.GetKey()),
 	)
 	// 进行http请求
 	res, err := http.Get(u)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	// 延迟关闭http响应
 	defer res.Body.Close()
 	// http请求失败
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("server returned: %v", res.Status)
+		return fmt.Errorf("server returned: %v", res.Status)
 	}
 
 	bytes, err := io.ReadAll(res.Body)
 	// 读响应体失败
 	if err != nil {
-		return nil, fmt.Errorf("reading response body: %v", err)
+		return fmt.Errorf("reading response body: %v", err)
 	}
-	return bytes, nil
+	if err = proto.Unmarshal(bytes, out); err != nil {
+		return fmt.Errorf("decoding response body: %v", err)
+	}
+	return nil
 }
 
 // var _ PeerGetter = (*httpGetter)(nil)这行代码是一个编译时检查，

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package gocachepb;
 
-option go_package = "./";
+option go_package = "github.com/gocache/gocachepb";
 
 message Request {
     string group = 1;

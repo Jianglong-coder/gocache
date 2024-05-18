@@ -27,11 +27,11 @@ func (c *cache) add(key string, value ByteView) {
 }
 
 func (c *cache) get(key string) (value ByteView, ok bool) {
+	if c.lru == nil {
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.lru == nil {
-		return value, false
-	}
 	if v, ok := c.lru.Get(key); ok {
 		return v.(ByteView), ok
 	}

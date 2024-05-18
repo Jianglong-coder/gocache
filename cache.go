@@ -1,8 +1,9 @@
 package gocache
 
 import (
-	"example/gocache/lru"
 	"sync"
+
+	"github.com/neijuanxiaozi/gocache/lru"
 )
 
 // cache.go 的实现非常简单，实例化 lru，封装 get 和 add 方法，并添加互斥锁 mu。

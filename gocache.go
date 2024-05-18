@@ -15,8 +15,9 @@ import (
 	"log"
 	"sync"
 
-	pb "example/gocache/gocachepb"
-	"example/gocache/singleflight"
+	"github.com/neijuanxiaozi/gocache/singleflight"
+
+	pb "github.com/neijuanxiaozi/gocache/gocachepb"
 )
 
 // 定义接口 参数是string 返回值是[]byte

@@ -1,7 +1,6 @@
-package main
+package gocache
 
 import (
-	"example/gocache"
 	"fmt"
 	"log"
 	"net/http"
@@ -14,7 +13,7 @@ var db = map[string]string{
 }
 
 func main() {
-	gocache.NewGroup("scores", 2<<10, gocache.GetterFunc(
+	NewGroup("scores", 2<<10, GetterFunc(
 		func(key string) ([]byte, error) {
 			log.Println("[SlowDB] search key", key)
 			if v, ok := db[key]; ok {
@@ -24,7 +23,7 @@ func main() {
 		}))
 
 	addr := "localhost:9999"
-	peers := gocache.NewHTTPPool(addr)
+	peers := NewHTTPPool(addr)
 	log.Println("gocache is running at", addr)
 	log.Fatal(http.ListenAndServe(addr, peers))
 }

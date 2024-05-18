@@ -1,8 +1,6 @@
 package gocache
 
 import (
-	"example/gocache/consistenthash"
-	pb "example/gocache/gocachepb"
 	"fmt"
 	"io"
 	"log"
@@ -10,6 +8,10 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+
+	pb "github.com/neijuanxiaozi/gocache/gocachepb"
+
+	"github.com/neijuanxiaozi/gocache/consistenthash"
 
 	"go.starlark.net/lib/proto"
 )

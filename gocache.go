@@ -20,37 +20,37 @@ import (
 	pb "github.com/neijuanxiaozi/gocache/gocachepb"
 )
 
+var (
+	mu     sync.RWMutex              // 全局变量 groups 的读写锁
+	groups = make(map[string]*Group) // 全局变量 groups
+)
+
 // 定义接口 参数是string 返回值是[]byte
 // 当从缓存中获取数据失败时的回调函数 用于从源获取数据
-type Getter interface {
-	Get(key string) ([]byte, error)
+type Retriever interface {
+	retrieve(key string) ([]byte, error)
 }
 
 // 定义函数类型 GetterFunc，并实现 Getter 接口的 Get 方法。
-type GetterFunc func(key string) ([]byte, error)
+type RetrieverFunc func(key string) ([]byte, error)
 
 // 函数类型实现某一个接口，称之为接口型函数，方便使用者在调用时既能够传入函数作为参数，
 // 也能够传入实现了该接口的结构体作为参数。
 // 定义一个函数类型 F，并且实现接口 A 的方法，然后在这个方法中调用自己。
 // 这是 Go 语言中将其他函数（参数返回值定义与 F 一致）转换为接口 A 的常用技巧。
-func (f GetterFunc) Get(key string) ([]byte, error) {
+func (f RetrieverFunc) retrieve(key string) ([]byte, error) {
 	return f(key)
 }
 
 // 一个 Group 可以认为是一个缓存的命名空间，每个 Group 拥有一个唯一的名称 name。
 // 比如可以创建三个 Group，缓存学生的成绩命名为 scores，缓存学生信息的命名为 info，缓存学生课程的命名为 courses。
 type Group struct {
-	name      string              // 每个 Group 拥有一个唯一的名称 name
-	getter    Getter              // 即缓存未命中时获取源数据的回调(callback)
-	mainCache cache               // 即一开始实现的并发缓存
-	peers     PeerPicker          // 将 实现了 PeerPicker 接口的 HTTPPool(网络模块) 注入到 Group 中
-	loader    *singleflight.Group // 请求锁 保证同一个key的请求在同一时间只有一个 减少请求数量
+	name      string               // 每个 Group 拥有一个唯一的名称 name
+	getter    Retriever            // 即缓存未命中时获取源数据的回调(callback)
+	mainCache cache                // 即一开始实现的并发缓存
+	peers     PeerPicker           // 将 实现了 PeerPicker 接口的 HTTPPool(网络模块) 注入到 Group 中
+	loader    *singleflight.Flight // 请求锁 保证同一个key的请求在同一时间只有一个 减少请求数量
 }
-
-var (
-	mu     sync.RWMutex              // 全局变量 groups 的读写锁
-	groups = make(map[string]*Group) // 全局变量 groups
-)
 
 // 构建函数 NewGroup 用来实例化 Group，并且将 group 存储在全局变量 groups 中
 func NewGroup(name string, cacheBytes int64, getter Getter) *Group {

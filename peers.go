@@ -1,7 +1,5 @@
 package gocache
 
-import pb "example/gocache/gocachepb"
-
 /*
 	该文件实现流程(2) 从远程节点获取缓存值
 	(2)流程:
@@ -11,12 +9,12 @@ import pb "example/gocache/gocachepb"
 						|----------------------------> 回退到本地节点处理。
 */
 
-// PeerPicker 的 PickPeer() 方法用于根据传入的 key 选择相应节点 PeerGetter
-type PeerPicker interface {
-	PickPeer(key string) (peer PeerGetter, ok bool)
+// Picker 的 Pick() 方法用于根据传入的 key 选择相应的分布式节点
+type Picker interface {
+	Pick(key string) (peer Fetcher, ok bool)
 }
 
-// 接口 PeerGetter 的 Get() 方法用于从对应 group 查找缓存值。PeerGetter 就对应于上述流程中的 HTTP 客户端
-type PeerGetter interface {
-	Get(in *pb.Request, out *pb.Response) error
+// 接口 Fetcher 的 Fetch() 方法用于从其他节点查找缓存值。
+type Fetcher interface {
+	Fetch(group string, key string) error
 }

@@ -8,9 +8,13 @@ import (
 
 // cache.go 的实现非常简单，实例化 lru，封装 get 和 add 方法，并添加互斥锁 mu。
 type cache struct {
-	mu         sync.Mutex // 互斥锁
-	lru        *lru.Cache // lru
-	cacheBytes int64      // 缓存大小
+	mu       sync.Mutex // 互斥锁
+	lru      *lru.Cache // lru
+	capacity int64      // 缓存大小
+}
+
+func newCache(capacity int64) *cache {
+	return &cache{capacity: capacity}
 }
 
 // 在 add 方法中，判断了 c.lru 是否为 nil，如果等于 nil 再创建实例。
@@ -21,7 +25,7 @@ func (c *cache) add(key string, value ByteView) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.lru == nil {
-		c.lru = lru.New(c.cacheBytes, nil)
+		c.lru = lru.New(c.capacity, nil)
 	}
 	c.lru.Add(key, value)
 }

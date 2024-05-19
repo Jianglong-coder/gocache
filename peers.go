@@ -16,5 +16,5 @@ type Picker interface {
 
 // 接口 Fetcher 的 Fetch() 方法用于从其他节点查找缓存值。
 type Fetcher interface {
-	Fetch(group string, key string) error
+	Fetch(group string, key string) ([]byte, error)
 }

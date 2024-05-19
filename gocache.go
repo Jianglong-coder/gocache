@@ -16,8 +16,6 @@ import (
 	"sync"
 
 	"github.com/neijuanxiaozi/gocache/singleflight"
-
-	pb "github.com/neijuanxiaozi/gocache/gocachepb"
 )
 
 var (
@@ -31,7 +29,7 @@ type Retriever interface {
 	retrieve(key string) ([]byte, error)
 }
 
-// 定义函数类型 GetterFunc，并实现 Getter 接口的 Get 方法。
+// 定义函数类型 RetrieverFunc，并实现 Retriever 接口的 retrieve 方法。
 type RetrieverFunc func(key string) ([]byte, error)
 
 // 函数类型实现某一个接口，称之为接口型函数，方便使用者在调用时既能够传入函数作为参数，
@@ -46,30 +44,30 @@ func (f RetrieverFunc) retrieve(key string) ([]byte, error) {
 // 比如可以创建三个 Group，缓存学生的成绩命名为 scores，缓存学生信息的命名为 info，缓存学生课程的命名为 courses。
 type Group struct {
 	name      string               // 每个 Group 拥有一个唯一的名称 name
-	getter    Retriever            // 即缓存未命中时获取源数据的回调(callback)
-	mainCache cache                // 即一开始实现的并发缓存
-	peers     PeerPicker           // 将 实现了 PeerPicker 接口的 HTTPPool(网络模块) 注入到 Group 中
-	loader    *singleflight.Flight // 请求锁 保证同一个key的请求在同一时间只有一个 减少请求数量
+	cache     *cache               // 即一开始实现的并发缓存
+	retriever Retriever            // 即缓存未命中时获取源数据的回调(callback)
+	server    Picker               // 将实现了 PeerPicker 接口的 HTTPPool(网络模块) 注入到 Group 中
+	flight    *singleflight.Flight // 请求锁 保证同一个key的请求在同一时间只有一个 减少请求数量
 }
 
 // 构建函数 NewGroup 用来实例化 Group，并且将 group 存储在全局变量 groups 中
-func NewGroup(name string, cacheBytes int64, getter Getter) *Group {
-	if getter == nil {
-		panic("nil Getter")
+func NewGroup(name string, maxBytes int64, retriever Retriever) *Group {
+	if retriever == nil {
+		panic("Retriver is nil.")
 	}
-	mu.Lock()
-	defer mu.Unlock()
 	g := &Group{
 		name:      name,
-		getter:    getter,
-		mainCache: cache{cacheBytes: cacheBytes},
-		loader:    &singleflight.Group{},
+		cache:     newCache(maxBytes),
+		retriever: retriever,
+		flight:    &singleflight.Flight{},
 	}
+	mu.Lock()
 	groups[name] = g
+	mu.Unlock()
 	return g
 }
 
-// 获取对应组
+// 获取名字对应的group
 func GetGroup(name string) *Group {
 	mu.RLock()
 	g := groups[name]
@@ -77,8 +75,19 @@ func GetGroup(name string) *Group {
 	return g
 }
 
+func DestoryGroup(name string) {
+	g := GetGroup(name)
+	if g != nil {
+		server := g.server.(*server)
+		server.Stop()
+		delete(groups, name)
+		log.Printf("Destory cache [%s %s]", name, server.addr)
+	}
+
+}
+
 // Get 方法实现了上述所说的流程 ⑴ 和 ⑶。
-// 流程 ⑴ ：从 mainCache 中查找缓存，如果存在则返回缓存值。
+// 流程 ⑴ ：从 cache 中查找缓存，如果存在则返回缓存值。
 // 流程 ⑶ ：缓存不存在，则调用 load 方法，load 调用 getLocally（分布式场景下会调用 getFromPeer 从其他节点获取），
 // getLocally 调用用户回调函数 g.getter.Get() 获取源数据，并且将源数据添加到缓存 mainCache 中（通过 populateCache 方法）
 func (g *Group) Get(key string) (ByteView, error) {
@@ -87,7 +96,7 @@ func (g *Group) Get(key string) (ByteView, error) {
 		return ByteView{}, fmt.Errorf("key is required")
 	}
 	//缓存命中
-	if v, ok := g.mainCache.get(key); ok {
+	if v, ok := g.cache.get(key); ok {
 		log.Println("[GoCache] hit")
 		return v, nil
 	}
@@ -98,12 +107,13 @@ func (g *Group) Get(key string) (ByteView, error) {
 // 缓存未命中时 用load获取源数据
 func (g *Group) load(key string) (value ByteView, err error) {
 	// 用loader.Do去获取数据 保证同时时刻同一个key的请求只有一个
-	viewi, err := g.loader.Do(key, func() (interface{}, error) {
+	view, err := g.flight.Do(key, func() (interface{}, error) {
 		// 从其他节点缓存获取数据
-		if g.peers != nil {
-			if peer, ok := g.peers.PickPeer(key); ok {
-				if value, err := g.getFromPeer(peer, key); err == nil {
-					return value, nil
+		if g.server != nil {
+			if fetcher, ok := g.server.Pick(key); ok {
+				bytes, err := fetcher.Fetch(g.name, key)
+				if err == nil {
+					return ByteView{b: bytes}, nil
 				}
 			}
 			log.Println("[Gocache] Failed to get from peer", err)
@@ -112,29 +122,15 @@ func (g *Group) load(key string) (value ByteView, err error) {
 		return g.getLocally(key)
 	})
 	if err == nil {
-		return viewi.(ByteView), nil
+		return view.(ByteView), nil
 	}
 	return
-}
-
-// 从其他节点获取数据 并转为ByteView类型
-func (g *Group) getFromPeer(peer PeerGetter, key string) (ByteView, error) {
-	req := &pb.Request{
-		Group: g.name,
-		Key:   key,
-	}
-	res := &pb.Response{}
-	err := peer.Get(req, res)
-	if err != nil {
-		return ByteView{}, err
-	}
-	return ByteView{b: res.Value}, nil
 }
 
 // 从本地获取源数据
 func (g *Group) getLocally(key string) (ByteView, error) {
 	// 获取源数据
-	bytes, err := g.getter.Get(key)
+	bytes, err := g.retriever.retrieve(key)
 	// 获取源数据失败
 	if err != nil {
 		return ByteView{}, err
@@ -148,13 +144,13 @@ func (g *Group) getLocally(key string) (ByteView, error) {
 
 // 将从源数据获取的数据 放入缓存中
 func (g *Group) populateCache(key string, value ByteView) {
-	g.mainCache.add(key, value)
+	g.cache.add(key, value)
 }
 
-// 将实现了 PeerPicker 接口的 HTTPPool 注入到 Group 中
-func (g *Group) RegisterPeers(peers PeerPicker) {
-	if g.peers != nil {
-		panic("RegisterPeerPicker called more than once")
+// 将实现了 Picker 接口的 Server(实现了网络模块的服务端) 注入到 Group 中
+func (g *Group) RegisterSvr(p Picker) {
+	if g.server != nil {
+		panic("group has been registered server")
 	}
-	g.peers = peers
+	g.server = p
 }

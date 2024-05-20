@@ -107,7 +107,7 @@ func (g *Group) Get(key string) (ByteView, error) {
 // 缓存未命中时 用load获取源数据
 func (g *Group) load(key string) (value ByteView, err error) {
 	// 用loader.Do去获取数据 保证同时时刻同一个key的请求只有一个
-	view, err := g.flight.Do(key, func() (interface{}, error) {
+	view, err := g.flight.Fly(key, func() (interface{}, error) {
 		// 从其他节点缓存获取数据
 		if g.server != nil {
 			if fetcher, ok := g.server.Pick(key); ok {

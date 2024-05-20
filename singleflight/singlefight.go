@@ -16,7 +16,7 @@ type Flight struct {
 }
 
 // 对Group 实现do方法 不论Do被调用多少次 传入的fn都只会被调用一次 等待fn调用结束了 返回返回值或者错误
-func (f *Flight) Do(key string, fn func() (interface{}, error)) (interface{}, error) {
+func (f *Flight) Fly(key string, fn func() (interface{}, error)) (interface{}, error) {
 	f.mu.Lock()
 	//	Group里的map结构延迟初始化
 	if f.flight == nil {

@@ -48,7 +48,7 @@ func (c *Consistentency) Register(peersName ...string) {
 	sort.Ints(c.ring)
 }
 
-func (c *Consistentency) Get(key string) string {
+func (c *Consistentency) GetPeer(key string) string {
 	// hash环上节点的数量为0
 	if len(c.ring) == 0 {
 		return ""

@@ -14,14 +14,14 @@ type Consistentency struct {
 	hash     HashFunc       // Hash函数
 	replicas int            // 虚拟节点个数
 	ring     []int          // 哈希环
-	hashMap  map[int]string // 虚拟节点与真实节点的映射表 键是虚拟节点的哈希值 值是真实节点的名称
+	hashmap  map[int]string // 虚拟节点与真实节点的映射表 键是虚拟节点的哈希值 值是真实节点的名称
 }
 
 func New(replicas int, fn HashFunc) *Consistentency {
 	c := &Consistentency{
 		hash:     fn,
 		replicas: replicas,
-		hashMap:  make(map[int]string),
+		hashmap:  make(map[int]string),
 	}
 	if c.hash == nil {
 		c.hash = crc32.ChecksumIEEE //  ChecksumIEEE需要更详细的资料
@@ -41,7 +41,7 @@ func (c *Consistentency) Register(peersName ...string) {
 			// 使用 append(m.keys, hash) 添加到环上
 			c.ring = append(c.ring, hashValue)
 			// 在 hashMap 中增加虚拟节点和真实节点的映射关系
-			c.hashMap[hashValue] = peerName
+			c.hashmap[hashValue] = peerName
 		}
 	}
 	// 环上的哈希值排序
@@ -60,5 +60,5 @@ func (c *Consistentency) GetPeer(key string) string {
 		return c.ring[i] >= hashValue
 	})
 	// 返回虚拟节点对应的真实节点 如果idx==len(m.keys) 说明应该选择m.keys[0] 因为keys是个环状结构
-	return c.hashMap[c.ring[idx%len(c.ring)]]
+	return c.hashmap[c.ring[idx%len(c.ring)]]
 }

@@ -6,8 +6,8 @@ import (
 	"log"
 	"time"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/client/v3/naming/endpoints"
-	"go.etcd.io/etcd/clientv3"
 )
 
 var (
@@ -17,12 +17,14 @@ var (
 	}
 )
 
-// etcdAdd 在租赁模式添加一对kv至etcd
+// etcdAdd 在租赁模式添加一对kv至etcd   service是服务名 为gocache
 func etcdAdd(c *clientv3.Client, lid clientv3.LeaseID, service string, addr string) error {
+	// 创建endpoints管理器 用于管理或操作与端点（endpoints）相关的功能。
 	em, err := endpoints.NewManager(c, service)
 	if err != nil {
 		return err
 	}
+	// 添加一个endpoint 返回一个error
 	//return em.AddEndpoint(c.Ctx(), service+"/"+addr, endpoints.Endpoint{Addr: addr})
 	return em.AddEndpoint(c.Ctx(), service+"/"+addr, endpoints.Endpoint{Addr: addr}, clientv3.WithLease(lid))
 }

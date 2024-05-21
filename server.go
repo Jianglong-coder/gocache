@@ -11,6 +11,7 @@ import (
 
 	"github.com/neijuanxiaozi/gocache/consistenthash"
 	pb "github.com/neijuanxiaozi/gocache/gocachepb"
+	"github.com/neijuanxiaozi/gocache/registry"
 	"github.com/neijuanxiaozi/gocache/utils"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
@@ -31,13 +32,13 @@ var (
 
 // gocache的网络模块中的服务端模块 负责等待其他节点的rpc请求 或者客户端的请求 server与cache是解耦的
 type server struct {
-	addr                              string                         // 当前节点的ip和port
-	status                            bool                           // 当前节点是否运行
-	stopSignal                        chan error                     // 通知registry revoke服务 作用未知
-	mu                                sync.Mutex                     // 操作一致性哈希时 加锁
-	consHash                          *consistenthash.Consistentency // 一致性hash
-	clients                           map[string]*client             // 其他节点
-	*pb.UnimplementedGroupCacheServer                                // 实现grpc需要
+	addr                           string                         // 当前节点的ip和port
+	status                         bool                           // 当前节点是否运行
+	stopSignal                     chan error                     // 通知registry revoke服务 作用未知
+	mu                             sync.Mutex                     // 操作一致性哈希时 加锁
+	consHash                       *consistenthash.Consistentency // 一致性hash
+	clients                        map[string]*client             // 其他节点
+	*pb.UnimplementedGoCacheServer                                // 实现grpc需要
 }
 
 // 创建一个server实例
@@ -117,9 +118,9 @@ func (s *server) Start() error {
 		return fmt.Errorf("faild to listen: %v", err)
 	}
 	grpcServer := grpc.NewServer()
-	pb.RegisterGroupCacheServer(grpcServer, s)
+	pb.RegisterGoCacheServer(grpcServer, s)
 
-	// 注册服务至etcd
+	// 注册服务至etcd 并持续监听etcd之间的心跳
 	go func() {
 		//TODO
 		err := registry.Register("gocache", s.addr, s.stopSignal)
@@ -128,7 +129,7 @@ func (s *server) Start() error {
 		}
 		// 关闭管道
 		close(s.stopSignal)
-		// 关闭tcp listen  这里为什么要关闭
+		// 关闭tcp listen
 		err = lis.Close()
 		if err != nil {
 			log.Fatalf(err.Error())
